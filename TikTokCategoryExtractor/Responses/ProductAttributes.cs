@@ -29,6 +29,9 @@
         [JsonIgnore]
         public string CategoryName { get; set; }
 
+        [JsonIgnore]
+        public string CategoryId { get; set; }
+
         [JsonProperty("attribute_type")]
         public long AttributeType { get; set; }
 
