@@ -121,6 +121,7 @@ namespace TikTokCategoryExtractor
                     }
 
                     // Get Response
+                    Thread.Sleep(4000);
                     var response = client.SendAsync(request).Result;
                     if (response.StatusCode == HttpStatusCode.OK)
                     {

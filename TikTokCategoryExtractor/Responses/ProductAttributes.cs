@@ -32,6 +32,9 @@
         [JsonIgnore]
         public string CategoryId { get; set; }
 
+        [JsonIgnore]
+        public string ConcatenatedValues { get; set; }
+
         [JsonProperty("attribute_type")]
         public long AttributeType { get; set; }
 
