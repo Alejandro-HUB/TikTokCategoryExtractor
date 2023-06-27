@@ -27,7 +27,7 @@ namespace TikTokCategoryExtractor
             _commonParameters = new Dictionary<string, string>
             {
                 { "app_key", _appKey },
-                { "timestamp", ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds().ToString() },
+                { "timestamp", ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeSeconds().ToString() },
                 { "access_token", _accessToken },
                 { "version", _apiVersion },
             };
@@ -45,10 +45,14 @@ namespace TikTokCategoryExtractor
         /// <param name="useCommonParameters"></param>
         /// <returns>T</returns>
         public T SendRequest<T>(HttpMethod requestMethod, string uri,
-        string body, string errorMessage, Dictionary<string, string> headers = null,
-        Dictionary<string, string> queryParameters = null, bool useCommonParameters = true) where T : ITikTokResponse, new()
+         string body, string errorMessage, Dictionary<string, string> headers = null,
+         Dictionary<string, string> queryParameters = null, bool useCommonParameters = true) where T : ITikTokResponse, new()
         {
+            int retryCount = 0;
+            int retryTime = 15000; //Miliseconds (15 seconds)
             T responseContent = new T();
+
+        RetryTimestamp:
 
             try
             {
@@ -80,21 +84,36 @@ namespace TikTokCategoryExtractor
                     // Add Common Query Parameters
                     if (useCommonParameters)
                     {
+                        // Initialize params object
+                        if (queryParameters == null) { queryParameters = new Dictionary<string, string>(); }
+
                         // Update the request time stamp
-                        queryParams["timestamp"] = ((DateTimeOffset)DateTime.Now).ToUnixTimeSeconds().ToString();
+                        queryParams["timestamp"] = ((DateTimeOffset)DateTime.UtcNow).ToUnixTimeSeconds().ToString();
 
                         foreach (var param in queryParams)
                         {
-                            if (queryParameters == null || !queryParameters.ContainsKey(param.Key))
+                            if (!queryParameters.ContainsKey(param.Key))
                             {
-                                queryParameters = queryParameters ?? new Dictionary<string, string>();
                                 queryParameters.Add(param.Key, param.Value);
+                            }
+                            else
+                            {
+                                queryParameters[param.Key] = param.Value;
                             }
                         }
 
                         // Generate Signature
                         var signature = GenerateRequestSignature(queryParams, uri);
-                        queryParameters.Add("sign", signature);
+
+                        // Check if "sign" key already exists and update it, or add it if it doesn't exist
+                        if (queryParameters.ContainsKey("sign"))
+                        {
+                            queryParameters["sign"] = signature;
+                        }
+                        else
+                        {
+                            queryParameters.Add("sign", signature);
+                        }
                     }
 
                     // Add Query Parameters to Request Uri
@@ -120,20 +139,33 @@ namespace TikTokCategoryExtractor
                         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
                     }
 
+                    //The timestamp is invalid intermittently and sleeping before getting the response fixes this
+                    if (retryCount > 0)
+                    {
+                        Thread.Sleep(retryTime);
+                    }
+
                     // Get Response
-                    Thread.Sleep(4000);
                     var response = client.SendAsync(request).Result;
+                    var responseString = response.Content.ReadAsStringAsync().Result;
                     if (response.StatusCode == HttpStatusCode.OK)
                     {
-                        var responseString = response.Content.ReadAsStringAsync().Result;
                         responseContent = JsonConvert.DeserializeObject<T>(responseString);
                         responseContent.IsSuccess = true;
                         responseContent.Message = responseString;
                     }
+                    else if (response.StatusCode != HttpStatusCode.OK && retryCount <= 4)
+                    {
+                        retryCount++;
+                        retryTime = retryTime + 10000; //Add 10 seconds to rety time
+                        if (queryParameters.ContainsKey("timestamp")) { queryParameters.Remove("timestamp"); }
+                        if (queryParameters.ContainsKey("sign")) { queryParameters.Remove("sign"); }
+                        goto RetryTimestamp;
+                    }
                     else
                     {
                         responseContent.IsSuccess = false;
-                        responseContent.Message = $"{errorMessage}, EX: {response.StatusCode}";
+                        responseContent.Message = $"{errorMessage}, EX: {responseString}";
                     }
                 }
 
