@@ -150,7 +150,7 @@ internal class Program
                 {
                     foreach (var categoryDescription in categoryDescriptions) 
                     {
-                        ConvertObjectToHtmlDescriptionFile(categoryDescription, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", $"{categoryDescription.AttributeName}.html"));
+                        ConvertObjectToHtmlDescriptionFile(categoryDescription, Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", $"{categoryDescription.AttributeName.Replace("\\", "").Replace("/", "")}.html"));
                     }
                 }
             }
@@ -191,15 +191,24 @@ internal class Program
         {
             writer.WriteLine($"<b>{description.AttributeName}</b><br><br>");
 
-            foreach (var item in description.unorderedLists)
+            var groupedCategories = description.unorderedLists
+                .GroupBy(item => item.CategoryUnorderedList)
+                .Select(group => new
+                {
+                    CategoryNames = string.Join(", ", group.Select(item => item.CategoryName)),
+                    UnorderedList = group.Key
+                });
+
+            foreach (var group in groupedCategories)
             {
-                writer.WriteLine($"<br><b>Accepted Values for the Category: {item.CategoryName}</b>");
-                writer.WriteLine(item.CategoryUnorderedList);
+                writer.WriteLine($"<br><b>Accepted Values for the Categories: {group.CategoryNames}</b>");
+                writer.WriteLine(group.UnorderedList);
             }
         }
 
         Console.WriteLine("HTML description generated successfully.");
     }
+
 
     public static void ConvertListToHtmlFile(string listInput, string filePath)
     {
@@ -223,13 +232,34 @@ internal class Program
     public static string ConvertListToHtml(string listInput)
     {
         string[] items = listInput.Split(':');
-        var result = string.Empty;
-
-        result += "<ul>";
+        var numericItems = new List<int>();
+        var nonNumericItems = new List<string>();
 
         foreach (string item in items)
         {
-            result += $"    <li>{item}</li>";
+            if (int.TryParse(item, out int numericItem))
+            {
+                numericItems.Add(numericItem);
+            }
+            else
+            {
+                nonNumericItems.Add(item);
+            }
+        }
+
+        numericItems.Sort();
+        nonNumericItems.Sort();
+
+        var result = "<ul>";
+
+        foreach (int numericItem in numericItems)
+        {
+            result += $"    <li>{numericItem}</li>";
+        }
+
+        foreach (string nonNumericItem in nonNumericItems)
+        {
+            result += $"    <li>{nonNumericItem}</li>";
         }
 
         result += "</ul>";
@@ -238,7 +268,6 @@ internal class Program
 
         return result;
     }
-
 
     public static void GenerateEnum(string enumNamesInput, string enumValuesInput, string filePath, string enumName)
     {
