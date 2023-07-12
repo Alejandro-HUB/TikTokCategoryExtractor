@@ -30,9 +30,9 @@ internal class Program
     {
         _apiVersion = "202212";
         _baseURI = new Uri("https://open-api.tiktokglobalshop.com");
-        _accessToken = "TTP_gPVqRwAAAACgC9Q2hWu8S9I1n-DRzFC-hIPII_9L_Oa4pxQ0UN2kwuDFA_BbDwZqOvgUYXY81sTCuxxcW2cDhmHtFnQcC_t9Z4dMvwJWhaVhVJNbjYDXDIY5XceXnaPDSrnKeNSOov2UKbSfhMyJJVpWAhm-Oz9F6BGCuFDpm7zXtYpkvIaPbw";
-        _appKey = "684m8go9eavgo";
-        _appSecret = "8e2d5b38a4a3b76dbcc504ae2fc611e2fcd5649b";
+        _accessToken = "";
+        _appKey = "";
+        _appSecret = "";
         _client = new TikTokAPIClient(_baseURI, _accessToken, _appKey, _appSecret, _apiVersion);
         _attributes = new List<ProductAttribute>();
         _command = Command.GenerateFieldDescriptions;
