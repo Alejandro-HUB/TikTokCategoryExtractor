@@ -39,7 +39,7 @@ namespace TikTokCategoryExtractor.Helpers
 
                 using (var writer = new StreamWriter(csvFilePath))
                 {
-                    writer.WriteLine("CategoryName,CategoryId,AttributeType,Id,is_mandatory,is_multiple_selected,is_customized,Name,Values,ids");
+                    writer.WriteLine("CategoryName,CategoryId,AttributeType,Id,is_mandatory,is_multiple_selected,is_customized,Name,Values,ids,FieldDescription");
 
                     foreach (ProductAttribute attribute in attributes)
                     {
@@ -58,8 +58,9 @@ namespace TikTokCategoryExtractor.Helpers
                             List<string> idList = attribute.Values.Select(value => EscapeCsvField(value.Id.ToString())).ToList();
                             ids = string.Join(":", idList);
                         }
+                        string fieldDescription = ProductAttributesHelper.GenerateFieldDescription(attribute);
 
-                        string line = $"{categoryName},{categoryId},{attributeType},{id},{is_mandatory},{is_multiple_selected},{is_customized},{name},{values},{ids}";
+                        string line = $"{categoryName},{categoryId},{attributeType},{id},{is_mandatory},{is_multiple_selected},{is_customized},{name},{values},{ids},{fieldDescription}";
                         writer.WriteLine(line);
                     }
                 }

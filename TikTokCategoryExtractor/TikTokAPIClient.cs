@@ -50,12 +50,20 @@ namespace TikTokCategoryExtractor
         {
             int retryCount = 0;
             int retryTime = 15000; //Miliseconds (15 seconds)
+            bool invalidTimeStamp = false;
+            var responseString = string.Empty;
             T responseContent = new T();
 
         RetryTimestamp:
 
             try
             {
+                // If no access token, throw exception to not make unnecessary API call but continue compilation
+                if (string.IsNullOrEmpty(_accessToken))
+                {
+                    throw new Exception("No TikTok Access Token Found");
+                }
+
                 // Create a new HttpClient
                 using (HttpClient client = new HttpClient())
                 {
@@ -133,7 +141,9 @@ namespace TikTokCategoryExtractor
                     var request = new HttpRequestMessage(requestMethod, requestUriBuilder.Uri);
 
                     // Add Body to Request
-                    if ((requestMethod == HttpMethod.Post || requestMethod == HttpMethod.Put)
+                    if ((requestMethod == HttpMethod.Post
+                        || requestMethod == HttpMethod.Put
+                        || requestMethod == HttpMethod.Delete)
                         && !string.IsNullOrEmpty(body))
                     {
                         request.Content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -147,17 +157,23 @@ namespace TikTokCategoryExtractor
 
                     // Get Response
                     var response = client.SendAsync(request).Result;
-                    var responseString = response.Content.ReadAsStringAsync().Result;
+                    responseString = response.Content.ReadAsStringAsync().Result;
+
+                    //Verify error type
+                    invalidTimeStamp = !string.IsNullOrEmpty(responseString)
+                        && (responseString.ToLower().Contains("timestamp") || responseString.ToLower().Contains("sign"));
+                    int maxRetryTime = invalidTimeStamp ? 4 : 1;
+
                     if (response.StatusCode == HttpStatusCode.OK)
                     {
                         responseContent = JsonConvert.DeserializeObject<T>(responseString);
                         responseContent.IsSuccess = true;
                         responseContent.Message = responseString;
                     }
-                    else if (response.StatusCode != HttpStatusCode.OK && retryCount <= 4)
+                    else if (response.StatusCode != HttpStatusCode.OK && retryCount <= maxRetryTime && !responseString.Contains("access_token is invalid"))
                     {
                         retryCount++;
-                        retryTime = retryTime + 10000; //Add 10 seconds to rety time
+                        retryTime = invalidTimeStamp ? (retryTime + 10000) : retryTime; //Add 10 seconds to rety time if invalid timestamp
                         if (queryParameters.ContainsKey("timestamp")) { queryParameters.Remove("timestamp"); }
                         if (queryParameters.ContainsKey("sign")) { queryParameters.Remove("sign"); }
                         goto RetryTimestamp;
