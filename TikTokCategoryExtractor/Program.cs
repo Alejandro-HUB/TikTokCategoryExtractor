@@ -30,7 +30,7 @@ internal class Program
 
     private static void InitializeProperties()
     {
-        _apiVersion = "";
+        _apiVersion = "202212";
         _baseURI = new Uri("https://open-api.tiktokglobalshop.com");
         _accessToken = "";
         _appKey = "";
