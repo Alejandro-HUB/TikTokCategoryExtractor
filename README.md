@@ -8,6 +8,7 @@ This repository contains a program that interacts with the TikTok API and perfor
 - FindMatchingKeys
 - BuildCategoryBreadCrumbs
 - GenerateFieldDescriptions
+- RemoveDuplicateProducts
 
 ## Prerequisites
 
