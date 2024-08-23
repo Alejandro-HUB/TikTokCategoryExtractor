@@ -1,26 +1,40 @@
 ﻿using Newtonsoft.Json;
-using TikTokCategoryExtractor.Interfaces;
 using System.Security.Cryptography;
 using System.Text;
 using System.Net.Http.Headers;
 using System.Net;
 using System.Web;
+using TikTokCategoryExtractor.Interfaces;
+using TikTokCategoryExtractor.Responses;
 
 namespace TikTokCategoryExtractor
 {
     public class TikTokAPIClient
     {
         private readonly Uri _baseURI;
-        private readonly string _accessToken;
+        private string _accessToken;
+        private string _accessTokenExpiresIn;
+        private string _refreshToken;
         private readonly string _appKey;
         private readonly string _appSecret;
         private readonly string _apiVersion;
         private readonly Dictionary<string, string> _commonParameters;
+        public static readonly List<string> _errorResponseMessages = new List<string>
+        {
+            "access_token is invalid",
+            "access_token is expired",
+            "authoirzaition is expired",
+            "authorization is expired",
+            "access_token"
+        };
         public TikTokAPIClient(Uri baseURI, string accessToken,
+            string accessTokenExpiresIn, string refreshToken,
             string appKey, string appSecret, string apiVersion)
         {
             _baseURI = baseURI;
             _accessToken = accessToken;
+            _accessTokenExpiresIn = accessTokenExpiresIn;
+            _refreshToken = refreshToken;
             _appKey = appKey;
             _appSecret = appSecret;
             _apiVersion = apiVersion;
@@ -46,10 +60,10 @@ namespace TikTokCategoryExtractor
         /// <returns>T</returns>
         public T SendRequest<T>(HttpMethod requestMethod, string uri,
          string body, string errorMessage, Dictionary<string, string> headers = null,
-         Dictionary<string, string> queryParameters = null, bool useCommonParameters = true) where T : ITikTokResponse, new()
+         Dictionary<string, string> queryParameters = null, bool useCommonParameters = true, string shop_cipher = null) where T : ITikTokResponse, new()
         {
             int retryCount = 0;
-            int retryTime = 15000; //Miliseconds (15 seconds)
+            int retryTime = 3000; //Miliseconds (3 seconds)
             bool invalidTimeStamp = false;
             var responseString = string.Empty;
             T responseContent = new T();
@@ -92,6 +106,19 @@ namespace TikTokCategoryExtractor
                     // Add Common Query Parameters
                     if (useCommonParameters)
                     {
+                        // The new API version "202312" requires shop_cipher and uses different authentication
+                        if (!string.IsNullOrEmpty(shop_cipher))
+                        {
+                            // Add shop cipher
+                            queryParams.Add("shop_cipher", shop_cipher);
+
+                            // Update version "202212" parameter to "202312"
+                            queryParams["version"] = "202312";
+
+                            // Add access token as a header as well
+                            client.DefaultRequestHeaders.Add("x-tts-access-token", _accessToken);
+                        }
+
                         // Initialize params object
                         if (queryParameters == null) { queryParameters = new Dictionary<string, string>(); }
 
@@ -162,18 +189,24 @@ namespace TikTokCategoryExtractor
                     //Verify error type
                     invalidTimeStamp = !string.IsNullOrEmpty(responseString)
                         && (responseString.ToLower().Contains("timestamp") || responseString.ToLower().Contains("sign"));
-                    int maxRetryTime = invalidTimeStamp ? 4 : 1;
+                    int maxRetryTime = invalidTimeStamp ? 2 : 1;
 
-                    if (response.StatusCode == HttpStatusCode.OK)
+                    if (!string.IsNullOrEmpty(responseString) && !ValidateAccessToken(responseString))
+                    {
+                        responseContent.IsSuccess = false;
+                        responseContent.Message = responseString;
+                        return responseContent;
+                    }
+                    else if (response.StatusCode == HttpStatusCode.OK)
                     {
                         responseContent = JsonConvert.DeserializeObject<T>(responseString);
                         responseContent.IsSuccess = true;
                         responseContent.Message = responseString;
                     }
-                    else if (response.StatusCode != HttpStatusCode.OK && retryCount <= maxRetryTime && !responseString.Contains("access_token is invalid"))
+                    else if (response.StatusCode != HttpStatusCode.OK && retryCount <= maxRetryTime)
                     {
                         retryCount++;
-                        retryTime = invalidTimeStamp ? (retryTime + 10000) : retryTime; //Add 10 seconds to rety time if invalid timestamp
+                        retryTime = invalidTimeStamp ? (retryTime + 3000) : retryTime; // Add 3 seconds to rety time if invalid timestamp
                         if (queryParameters.ContainsKey("timestamp")) { queryParameters.Remove("timestamp"); }
                         if (queryParameters.ContainsKey("sign")) { queryParameters.Remove("sign"); }
                         goto RetryTimestamp;
@@ -246,6 +279,123 @@ namespace TikTokCategoryExtractor
             {
                 return string.Empty;
             }
+        }
+
+        /// <summary>
+        /// Convert unixTimeStamp to DateTime
+        /// </summary>
+        /// <param name="unixTimeStamp"></param>
+        /// <returns></returns>
+        protected DateTime UnixTimeStampToDateTime(long unixTimeStamp)
+        {
+            System.DateTime dtDateTime = new DateTime(1970, 1, 1, 0, 0, 0, 0, System.DateTimeKind.Utc);
+            dtDateTime = dtDateTime.AddSeconds(unixTimeStamp);
+            return dtDateTime;
+        }
+
+        /// <summary>
+        /// Makes an API call and checks the expiry date to check if the access token is expired.
+        /// </summary>
+        /// <exception cref="Exception"></exception>
+        public void RefreshAccessToken()
+        {
+            string? accessTokenResponse = null;
+            string? refreshTokenResponse = null;
+            string? accessTokenExpiresInResponse = null;
+
+            //If no access token, throw exception but do not stop processing to allow feed compilation
+            if (string.IsNullOrEmpty(_accessToken))
+            {
+                throw new Exception("No TikTok Access Token Found");
+            }
+
+            //Refresh Token - verified through the expiry date and by making an API call
+            var response = SendRequest<AuthorizedShop>(HttpMethod.Get, "/api/shop/get_authorized_shop",
+                                        null, $"Failed to verify access token validity");
+            var isTokenValid = ValidateAccessToken(response?.Message ?? "", false);
+
+            //Check if the access token expiry date is within 24 hours from now or the expire date has already passed
+            if (_accessTokenExpiresIn != null
+                && long.TryParse(_accessTokenExpiresIn, out long unixTimeStamp)
+                && _accessToken != null)
+            {
+                DateTime expiryDateTime = UnixTimeStampToDateTime(unixTimeStamp);
+                TimeSpan timeDifference = expiryDateTime.Date.AddDays(1) - DateTime.Today;
+                if (timeDifference <= TimeSpan.FromHours(24) || DateTime.Now >= expiryDateTime || !isTokenValid)
+                {
+                    (accessTokenResponse, refreshTokenResponse, accessTokenExpiresInResponse) = getAndSaveNewAccessToken();
+
+                    //Failed to refresh the expired access token 
+                    if (string.IsNullOrEmpty(accessTokenResponse) || string.IsNullOrEmpty(refreshTokenResponse) || string.IsNullOrEmpty(accessTokenExpiresInResponse))
+                    { throw new Exception("The TikTok Access Token is Expired and the Operation to Refresh the Access Token Failed."); }
+                    else
+                    {
+                        _accessToken = accessTokenResponse;
+                        _refreshToken = refreshTokenResponse;
+                        _accessTokenExpiresIn = accessTokenExpiresInResponse;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Generates new access token and saves it to the database
+        /// </summary>
+        /// <returns></returns>
+        protected (string?, string?, string?) getAndSaveNewAccessToken()
+        {
+            try
+            {
+                //Create a new client that has a different _baseURI
+                var accessTokenClient = new TikTokAPIClient(new Uri("https://auth.tiktok-shops.com"), _accessToken, _accessTokenExpiresIn, _refreshToken, _appKey, _appSecret, _apiVersion);
+
+                //Set query params
+                var queryParams = new Dictionary<string, string>()
+                {
+                    { "app_key", _appKey },
+                    { "app_secret", _appSecret },
+                    { "refresh_token", _refreshToken },
+                    { "grant_type", "refresh_token" }
+                };
+
+                var refreshAccessTokenResponse = accessTokenClient.SendRequest<RefreshAccessTokenResponse>(HttpMethod.Get,
+                    "/api/v2/token/refresh", null,
+                    "Failed to GET TikTok Access Token", null, queryParams, false);
+
+                if (refreshAccessTokenResponse.IsSuccess
+                    && refreshAccessTokenResponse?.data?.access_token != null
+                    && refreshAccessTokenResponse?.data?.refresh_token != null
+                    && refreshAccessTokenResponse?.data?.access_token_expire_in != null)
+                {
+                    //Refresh variables
+                    return (refreshAccessTokenResponse?.data?.access_token, refreshAccessTokenResponse?.data?.refresh_token, refreshAccessTokenResponse?.data?.access_token_expire_in.ToString());
+                }
+                else
+                {
+                    return (null, null, null);
+                }
+            }
+            catch (Exception)
+            {
+                return (null, null, null);
+            }
+        }
+
+        public bool ValidateAccessToken(string response, bool throwException = true)
+        {
+            if (!string.IsNullOrEmpty(response) && _errorResponseMessages.Any(x => response.ToLower().Contains(x)))
+            {
+                if (throwException)
+                {
+                    throw new Exception("The TikTok Access Token is expired");
+                }
+                else
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 }
