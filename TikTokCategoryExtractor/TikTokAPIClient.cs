@@ -24,8 +24,7 @@ namespace TikTokCategoryExtractor
             "access_token is invalid",
             "access_token is expired",
             "authoirzaition is expired",
-            "authorization is expired",
-            "access_token"
+            "authorization is expired"
         };
         public TikTokAPIClient(Uri baseURI, string accessToken,
             string accessTokenExpiresIn, string refreshToken,
@@ -106,17 +105,20 @@ namespace TikTokCategoryExtractor
                     // Add Common Query Parameters
                     if (useCommonParameters)
                     {
-                        // The new API version "202312" requires shop_cipher and uses different authentication
+                        // The new API version "202309" requires shop_cipher and uses different authentication
                         if (!string.IsNullOrEmpty(shop_cipher))
                         {
                             // Add shop cipher
                             queryParams.Add("shop_cipher", shop_cipher);
 
-                            // Update version "202212" parameter to "202312"
-                            queryParams["version"] = "202312";
+                            // Update version "202212" parameter to "202309"
+                            queryParams["version"] = "202309";
 
                             // Add access token as a header as well
                             client.DefaultRequestHeaders.Add("x-tts-access-token", _accessToken);
+
+                            // Remove access token query paramter
+                            queryParams.Remove("access_token");
                         }
 
                         // Initialize params object
@@ -310,8 +312,7 @@ namespace TikTokCategoryExtractor
             }
 
             //Refresh Token - verified through the expiry date and by making an API call
-            var response = SendRequest<AuthorizedShop>(HttpMethod.Get, "/api/shop/get_authorized_shop",
-                                        null, $"Failed to verify access token validity");
+            var response = GetAuthorizedShop();
             var isTokenValid = ValidateAccessToken(response?.Message ?? "", false);
 
             //Check if the access token expiry date is within 24 hours from now or the expire date has already passed
@@ -336,6 +337,14 @@ namespace TikTokCategoryExtractor
                     }
                 }
             }
+        }
+
+        public AuthorizedShop GetAuthorizedShop()
+        {
+
+            //Refresh Token - verified through the expiry date and by making an API call
+            return SendRequest<AuthorizedShop>(HttpMethod.Get, "/api/shop/get_authorized_shop",
+                                        null, $"Failed to verify access token validity");
         }
 
         /// <summary>

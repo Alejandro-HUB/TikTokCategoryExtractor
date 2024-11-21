@@ -36,48 +36,47 @@ namespace TikTokCategoryExtractor.Helpers
             try
             {
                 string csvFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", fileName);
-
                 using (var writer = new StreamWriter(csvFilePath))
                 {
                     writer.WriteLine("CategoryName,CategoryId,AttributeType,Id,is_mandatory,is_multiple_selected,is_customized,Name,Values,ids,FieldDescription");
-
                     foreach (ProductAttribute attribute in attributes)
                     {
                         string categoryName = attribute.CategoryName != null ? EscapeCsvField(attribute.CategoryName) : "";
                         string categoryId = attribute.CategoryId != null ? EscapeCsvField(attribute.CategoryId) : "";
-                        string attributeType = attribute.AttributeType.ToString();
-                        string id = attribute.Id.ToString();
+                        string attributeType = EscapeCsvField(attribute.AttributeType.ToString());
+                        string id = EscapeCsvField(attribute.Id.ToString());
                         string is_mandatory = attribute.InputType?.IsMandatory != null ? EscapeCsvField(attribute.InputType.IsMandatory.ToString()) : "";
                         string is_multiple_selected = attribute.InputType?.IsMultipleSelected != null ? EscapeCsvField(attribute.InputType.IsMultipleSelected.ToString()) : "";
                         string is_customized = attribute.InputType?.IsCustomized != null ? EscapeCsvField(attribute.InputType.IsCustomized.ToString()) : "";
                         string name = attribute.Name != null ? EscapeCsvField(attribute.Name) : "";
-                        string values = attribute.ConcatenatedValues;
+                        string values = attribute.ConcatenatedValues != null ? EscapeCsvField(attribute.ConcatenatedValues) : "";
                         string ids = "";
                         if (attribute.Values != null && attribute.Values.Count > 0)
                         {
                             List<string> idList = attribute.Values.Select(value => EscapeCsvField(value.Id.ToString())).ToList();
                             ids = string.Join(":", idList);
                         }
-                        string fieldDescription = ProductAttributesHelper.GenerateFieldDescription(attribute);
-
+                        string fieldDescription = EscapeCsvField(ProductAttributesHelper.GenerateFieldDescription(attribute));
+                        // Create the CSV line
                         string line = $"{categoryName},{categoryId},{attributeType},{id},{is_mandatory},{is_multiple_selected},{is_customized},{name},{values},{ids},{fieldDescription}";
                         writer.WriteLine(line);
                     }
                 }
-
                 Console.WriteLine("CSV file exported successfully.");
             }
             catch (Exception e)
             {
+                Console.WriteLine($"Error exporting CSV file: {e.Message}");
             }
         }
-
         public static string EscapeCsvField(string fieldValue)
         {
-            if (fieldValue.Contains(",") || fieldValue.Contains("\"") || fieldValue.Contains("\n"))
+            if (string.IsNullOrEmpty(fieldValue))
+                return "";
+            if (fieldValue.Contains(",") || fieldValue.Contains("\"") || fieldValue.Contains("\n") || fieldValue.Contains("\r"))
             {
-                fieldValue = fieldValue.Replace("\"", "\"\"");
-                fieldValue = $"\"{fieldValue}\"";
+                fieldValue = fieldValue.Replace("\"", "\"\""); // Escape quotes
+                return $"\"{fieldValue}\""; // Wrap field in quotes
             }
             return fieldValue;
         }

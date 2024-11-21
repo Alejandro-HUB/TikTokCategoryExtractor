@@ -1,6 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using TikTokCategoryExtractor.Responses;
+﻿using TikTokCategoryExtractor.Responses;
 
 namespace TikTokCategoryExtractor.Helpers
 {
@@ -15,7 +13,7 @@ namespace TikTokCategoryExtractor.Helpers
     {
         private Dictionary<string, CategoryList> categoryDictionary;
 
-        public List<CategoryBreadCrumb> GenerateBreadcrumbs(List<CategoryList> categories)
+        public List<CategoryBreadCrumb> GenerateBreadcrumbs(List<CategoryList> categories, bool isNewApiVersion = false)
         {
             categoryDictionary = categories.ToDictionary(c => c.Id.ToString(), c => c);
 
@@ -25,6 +23,28 @@ namespace TikTokCategoryExtractor.Helpers
                 if (IsInnermostNode(category))
                 {
                     string breadcrumb = BuildBreadcrumb(category);
+                    string permissionStatus = string.Empty;
+
+                    // Check permission status
+                    if (isNewApiVersion 
+                        && category.PermissionStatuses != null)
+                    {
+                        permissionStatus = category.PermissionStatuses.FirstOrDefault(c => 
+                            c.Equals("INVITE_ONLY") || c.Equals("NON_MAIN_CATEGORY"));
+                        if (!string.IsNullOrEmpty(permissionStatus))
+                        {
+                            breadcrumb += $" ({permissionStatus})";
+                        }
+                    }
+
+                    // Check if the category is leaf
+                    if (category.IsLeaf == false)
+                    {
+                        // Skip non leaf categories as they are read-only
+                        continue;
+                        breadcrumb += $" (NON-LEAF)";
+                    }
+
                     breadcrumbs.Add(new CategoryBreadCrumb()
                     {
                         Department = breadcrumb.Contains(">") ? breadcrumb.Replace(" ", "").Split('>').First()

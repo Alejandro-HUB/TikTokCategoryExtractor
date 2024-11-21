@@ -28,6 +28,7 @@ internal class Program
     private static Command _command;
     private static string _fileName;
     private static string _filePath;
+    private static string _shopCipher;
 
     private static void InitializeProperties()
     {
@@ -46,6 +47,9 @@ internal class Program
 
         // Check if the access token is expired 
         _client.RefreshAccessToken();
+
+        // We need to get Authorized Shop Chipher to make API requests on the new API versions for 2023
+        _shopCipher = _client.GetAuthorizedShop()?.Data?.ShopList?.FirstOrDefault()?.ShopCipher;
     }
 
     private static void Main(string[] args)
@@ -84,7 +88,11 @@ internal class Program
     private static void HandleGenerateReport()
     {
         var tikTokCategories = _client.SendRequest<TikTokCategories>(HttpMethod.Get,
-                    "/api/products/categories", null, "Failed to get categories");
+                    "/api/products/categories", null, "Failed to get categories", null,
+                    new Dictionary<string, string>
+                    {
+                        { "category_version", "v2" }
+                    });
 
         if (tikTokCategories.IsSuccess && tikTokCategories?.Data?.CategoryList != null)
         {
@@ -126,13 +134,32 @@ internal class Program
 
     private static void HandleBuildCategoryBreadCrumbs()
     {
-        var tikTokCategories = _client.SendRequest<TikTokCategories>(HttpMethod.Get,
-                    "/api/products/categories", null, "Failed to get categories");
+        TikTokCategories tikTokCategories;
+        var isNewApiVersion = !string.IsNullOrEmpty(_shopCipher);
+
+        // Assume we are using old API version if Shop Cipher is empty
+        if (isNewApiVersion == false)
+        {
+            tikTokCategories = _client.SendRequest<TikTokCategories>(HttpMethod.Get,
+                   "/api/products/categories", null, "Failed to get categories", null,
+                    new Dictionary<string, string>
+                    {
+                        { "category_version", "v2" }
+                    });
+        }
+        else
+        {
+            _apiVersion = "202309";
+            tikTokCategories = _client.SendRequest<TikTokCategories>(HttpMethod.Get,
+                  $"/product/{_apiVersion}/categories", null, "Failed to get categories", null, 
+                  new Dictionary<string, string> { { "locale", "en-US" }, { "category_version", "v2" } }, true, _shopCipher);
+        }
+       
 
         if (tikTokCategories.IsSuccess && tikTokCategories?.Data?.CategoryList != null)
         {
             var generator = new CategoryBreadcrumbsGenerator();
-            var breadcrumbs = generator.GenerateBreadcrumbs(tikTokCategories.Data.CategoryList);
+            var breadcrumbs = generator.GenerateBreadcrumbs(tikTokCategories.Data.CategoryList, isNewApiVersion);
             CSVWriter.WriteBreadCrumbsToCsv(breadcrumbs, _filePath);
         }
     }
@@ -140,7 +167,11 @@ internal class Program
     private static void HandleGenerateFieldDescriptions()
     {
         var tikTokCategories = _client.SendRequest<TikTokCategories>(HttpMethod.Get,
-                   "/api/products/categories", null, "Failed to get categories");
+                   "/api/products/categories", null, "Failed to get categories", null,
+                    new Dictionary<string, string>
+                    {
+                        { "category_version", "v2" }
+                    });
 
         if (tikTokCategories.IsSuccess && tikTokCategories?.Data?.CategoryList != null)
         {
@@ -222,7 +253,7 @@ internal class Program
         {
             var productAttributes = _client.SendRequest<ProductAttributes>(HttpMethod.Get,
                "/api/products/attributes", null, "Failed to get category rule", null,
-               new Dictionary<string, string> { { "category_id", category.Id.ToString() } });
+               new Dictionary<string, string> { { "category_id", category.Id.ToString() }, { "category_version", "v2" } });
 
             if (productAttributes.IsSuccess && productAttributes?.Data?.Attributes != null)
             {
@@ -246,10 +277,8 @@ internal class Program
     private static void GenerateCategoryReport(TikTokCategories tikTokCategories)
     {
         PopulateProductAttributes(tikTokCategories);
-
         var groups = _attributes.GroupBy(o => o.CategoryName);
         string textFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads", "report.txt");
-
         using (var writer = new StreamWriter(textFilePath))
         {
             writer.WriteLine($"Category Count: {tikTokCategories.Data.CategoryList.Count}");
@@ -262,26 +291,27 @@ internal class Program
                 writer.WriteLine("Category: {0}, Count: {1}, Required: {2}", group.Key, group.Count(), group.Any(item => item?.InputType?.IsMandatory != null && item.InputType.IsMandatory));
             }
         }
-
         Console.Clear();
         Console.WriteLine($"Category Count: {tikTokCategories.Data.CategoryList.Count}");
         Console.WriteLine($"Field Count: {_attributes.Count}");
         Console.WriteLine($"Categories With Properties: {groups.Count()}");
         Console.WriteLine($"Categories With Required Properties: {groups.Count(group => group.Any(item => item?.InputType?.IsMandatory != null && item.InputType.IsMandatory))}");
         Console.WriteLine($"Required Properties: {_attributes.Where(x => x?.InputType?.IsMandatory != null && x.InputType.IsMandatory).Count()}");
-
         foreach (var group in groups)
         {
             Console.WriteLine("Category: {0}, Count: {1}, Required: {2}", group.Key, group.Count(), group.Any(item => item?.InputType?.IsMandatory != null && item.InputType.IsMandatory));
         }
-
         //Full Attributes List
         CSVWriter.WriteCsvFile(_attributes, "product_attributes.csv");
-
         //Filtered for unique attributes that are required
         CSVWriter.WriteCsvFile(_attributes
                     .Where(item => item?.InputType?.IsMandatory == true && ((item?.Values != null && item.Values.Any()) || (item?.Values == null || !item.Values.Any())))
                     .GroupBy(item => item.Name) // Group by item.Name
+                    .Select(group => group.First()) // Select the first item from each group
+                    .ToList(), "product_attributes_required.csv");
+        //Filtered for unique attributes
+        CSVWriter.WriteCsvFile(_attributes
+                    .GroupBy(item => item.Id) // Group by item.Name
                     .Select(group => group.First()) // Select the first item from each group
                     .ToList(), "product_attributes_unique.csv");
     }
